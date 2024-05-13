@@ -1,0 +1,117 @@
+trigger:
+- master
+
+resources:
+- repo: self
+
+variables:
+  tag: 'latest'
+
+pool:
+  name: 'Default'
+  vmImage: ubuntu-latest
+
+stages:
+- stage: 
+  displayName: Sonarqube
+  jobs:
+  - job: 
+    steps:
+      - task: SonarQubePrepare@5
+        inputs:
+          SonarQube: 'sonar'
+          scannerMode: 'CLI'
+          configMode: 'manual'
+          cliProjectKey: 'Finalyear_Finalyear_AY5xalylZbOz05ZBDzS4'
+          cliProjectName: 'Finalyear'
+          cliSources: '.'
+      - task: SonarQubeAnalyze@5
+        inputs:
+          jdkversion: 'JAVA_HOME_11_X64'
+      - task: SonarQubePublish@5
+        inputs:
+          pollingTimeoutSec: '300'
+      
+
+
+
+- stage: dependency_check
+  displayName: Dependency_Scanning
+  jobs:
+    - job: owasp_dependency
+      steps:
+      - task: dependency-check-build-task@6
+        displayName: 'Running dependency checks'
+        inputs:
+          projectName: 'Finalyear'
+          scanPath: '.'
+          format: 'HTML'
+          reportsDirectory: '$(Build.SourcesDirectory)/dependency-check-report'
+
+
+
+- stage: Build
+  displayName: Build Image
+  dependsOn: dependency_check
+  jobs:
+    - job: Build
+      steps:
+      - task: Docker@2
+        inputs:
+          containerRegistry: 'Docker'
+          repository: 'shubhamasgaonkar/reddit-clone'
+#          command: 'buildAndPush'
+          command: 'build'
+          Dockerfile: '**/Dockerfile'
+          tags: |
+           $(tag)
+
+- stage: Image_Scanning
+  displayName: Docker Image Scanning
+  dependsOn: Build
+  jobs:
+    - job: Trivy
+      steps:
+      - task: CmdLine@2
+        displayName: Run Trivy
+        inputs:
+          script: |
+
+            echo '$(passwd)' | sudo -S trivy image docker.io/shubhamasgaonkar/reddit-clone:$(tag) | tee trivy-test.txt
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Trivy Report'
+        inputs:
+          
+          pathtoPublish: '$(Build.SourcesDirectory)/trivy-test.txt'  # Adjusted path  trivy-test.txt
+          artifactName: 'Trivy-Report'
+          publishLocation: 'Container'
+
+
+- stage: Push
+  displayName: Pushing image
+  dependsOn: Image_Scanning
+  jobs:
+    - job: Push
+      steps:
+      - task: Docker@2
+        inputs:
+          containerRegistry: 'Docker'
+          repository: 'shubhamasgaonkar/reddit-clone'
+          command: 'push'
+          tags: |
+           $(tag)
+
+
+- stage: 
+  displayName: Deploy to azure web app
+  jobs:
+    - job: deploy
+      displayName: Deploying.....
+      steps:
+      - task: AzureWebAppContainer@1
+        inputs:
+          azureSubscription: 'Free Trial(1d06fcb4-3723-421b-b7f3-89ef0d7eb7f1)'
+          appName: 'reddit-clone'
+          imageName: 'shubhamasgaonkar/reddit-clone:$(tag)'
+          
